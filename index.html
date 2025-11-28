@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>Med Tracker</title>
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    #confirm-modal { transition: opacity 0.2s ease-in-out; }
+    #confirm-box { transition: transform 0.2s ease-in-out; transform: scale(0.95); }
+  </style>
+</head>
+<body class="bg-gray-900 font-sans text-gray-100 pb-10 min-h-screen">
+
+  <header class="bg-blue-600 text-white p-4 shadow-md sticky top-0 z-50">
+    <div class="max-w-md mx-auto flex justify-between items-center pt-[env(safe-area-inset-top)]">
+      <h1 class="text-xl font-bold">My Tracker</h1>
+      <button onclick="window.location.reload()" class="text-sm bg-blue-700 px-3 py-1 rounded">Refresh</button>
+    </div>
+  </header>
+
+  <main class="max-w-md mx-auto p-4 space-y-6">
+    <div id="status-msg" class="hidden p-3 rounded-md mb-4 text-sm font-semibold text-center"></div>
+
+    <section id="scheduled-section">
+      <h2 class="text-lg font-semibold text-gray-400 mb-2 uppercase tracking-wide text-xs">Daily Scheduled</h2>
+      <div id="scheduled-cards" class="space-y-3"></div>
+    </section>
+    
+    <section id="weekly-section">
+      <h2 class="text-lg font-semibold text-gray-400 mb-2 uppercase tracking-wide text-xs">Weekly Scheduled</h2>
+      <div id="weekly-cards" class="space-y-3"></div>
+    </section>
+
+    <section id="prn-section">
+      <h2 class="text-lg font-semibold text-gray-400 mb-2 uppercase tracking-wide text-xs">As Needed (Pain & Anxiety)</h2>
+      <div id="prn-cards" class="space-y-3"></div>
+    </section>
+
+    <section id="topical-section">
+      <h2 class="text-lg font-semibold text-gray-400 mb-2 uppercase tracking-wide text-xs">Creams & Shampoo</h2>
+      <div id="topical-cards" class="space-y-3"></div>
+    </section>
+  </main>
+
+  <div id="confirm-modal" class="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black bg-opacity-70 hidden opacity-0" onclick="hideConfirm()">
+    <div id="confirm-box" class="bg-gray-800 p-6 rounded-xl shadow-2xl w-full max-w-sm" onclick="event.stopPropagation()">
+      <h3 id="confirm-title" class="text-lg font-bold text-white mb-2">Confirm Undo</h3>
+      <p id="confirm-text" class="text-gray-300 mb-6">Are you sure?</p>
+      <div class="flex gap-3">
+        <button id="confirm-cancel" class="w-full py-3 rounded-lg font-bold bg-gray-600 hover:bg-gray-500 text-white" onclick="hideConfirm()">Cancel</button>
+        <button id="confirm-yes" class="w-full py-3 rounded-lg font-bold bg-red-600 hover:bg-red-500 text-white">Yes, Undo</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // --- MEDICATION DATABASE ---
+    const DB = [
+      // --- 3x DAILY ---
+      // Gabapentin uses Window Logic (sched-window)
+      { id: 'gabapentin100', name: 'Gabapentin 100mg', type: 'sched-window', total: 3, maxPool: 2, wait: 5, desc: '1-2 caps, 3x daily', unit: 'Cap' },
+      { id: 'gabapentin300', name: 'Gabapentin 300mg', type: 'sched-window', total: 3, maxPool: 2, wait: 6, desc: '1-2 caps, 3x daily', unit: 'Cap' },
+      { id: 'peppermint', name: 'Peppermint Oil', type: 'sched', total: 3, desc: '1 three times daily (before food)', amt: 1, unit: 'Cap' },
+
+      // --- 2x DAILY ---
+      { id: 'sertraline', name: 'Sertraline 100mg', type: 'sched', total: 2, desc: '2 daily (for anxiety)', amt: 1, unit: 'Tab' },
+      { id: 'naproxen', name: 'Naproxen 500mg', type: 'sched', total: 2, desc: '1 twice daily', amt: 1, unit: 'Tab' },
+
+      // --- 1x DAILY ---
+      { id: 'omeprazole', name: 'Omeprazole 20mg', type: 'sched', total: 1, desc: '1 daily (with Naproxen)', amt: 1, unit: 'Cap' },
+      { id: 'tamsulosin', name: 'Tamsulosin 400mcg', type: 'sched', total: 1, desc: '1 daily', amt: 1, unit: 'Cap' },
+      { id: 'prep', name: 'Prep', type: 'sched', total: 1, desc: '1 daily', amt: 1, unit: 'Tab' },
+      { id: 'turmeric', name: 'Turmeric & Pepper', type: 'sched', total: 1, desc: '1 daily', amt: 1, unit: 'Cap' },
+      { id: 'multivit', name: 'Multi-Vitamins', type: 'sched', total: 1, desc: '1 daily', amt: 1, unit: 'Tab' },
+      { id: 'vitamind', name: 'Vitamin D', type: 'sched', total: 1, desc: '1 daily', amt: 1, unit: 'Tab' },
+
+      // --- WEEKLY ---
+      { id: 'semaglutide', name: 'Semaglutide', type: 'weekly', total: 1, desc: '1 injection weekly (Tuesday)', amt: 1, unit: 'Inj', targetDay: 2 },
+
+      // --- PRN (POOL LOGIC) ---
+      // Codeine reverted to Pool Logic (prn-pool)
+      { id: 'codeine', name: 'Codeine 15mg', type: 'prn-pool', wait: 4, maxPool: 2, max24h: 8, desc: '1-2 tablets per dose', unit: 'Tab' },
+      { id: 'paracetamol', name: 'Paracetamol 500mg', type: 'prn-pool', wait: 4, maxPool: 2, max24h: 8, desc: '1-2 tablets per dose', unit: 'Tab' },
+      { id: 'hyoscine', name: 'Hyoscine 10mg', type: 'prn-pool', wait: 4, maxPool: 2, max24h: 8, desc: '1-2 for stomach pain', unit: 'Tab' },
+
+      // --- PRN (SIMPLE) ---
+      { id: 'propranolol', name: 'Propranolol 40mg', type: 'prn', wait: 4, max24h: 4, desc: '1 for anxiety (up to 4x)', amt: 1, unit: 'Tab' },
+      { id: 'loperamide', name: 'Loperamide 2mg', type: 'prn', wait: 0, max24h: 8, desc: '1 for diarrhoea if required', amt: 1, unit: 'Cap' },
+
+      // --- TOPICAL ---
+      { id: 'cream', name: 'Hydrocortisone Cream', type: 'topical', desc: 'Apply thinly 1x daily' },
+      { id: 'shampoo', name: 'Ketoconazole Shampoo', type: 'topical', desc: 'Apply 2x weekly' },
+    ];
+
+    const KEY = 'meds_v15_final_layout';
+    let log = {}; 
+
+    function load() {
+      try {
+        const data = localStorage.getItem(KEY);
+        if (data) log = JSON.parse(data);
+      } catch(e) { showStatus("⚠️ Saving Disabled", 'error'); }
+      render();
+    }
+
+    function save() { try { localStorage.setItem(KEY, JSON.stringify(log)); } catch(e) {} }
+
+    function logDose(id, amount = 1) {
+      if (!log[id]) log[id] = [];
+      const now = Date.now();
+      const med = DB.find(m => m.id === id);
+      
+      if (med.type === 'sched' || med.type === 'topical' || med.type === 'weekly') {
+        log[id].push({ts: now, amt: amount});
+      } else {
+        for (let i = 0; i < amount; i++) log[id].push(now);
+      }
+      save();
+      render();
+    }
+    
+    // --- BUCKET LOGIC ---
+    function getDoseBuckets(history, waitHours) {
+      const sorted = [...history].sort((a, b) => a - b);
+      const buckets = [];
+      const waitMillis = waitHours * 3600 * 1000;
+      sorted.forEach(ts => {
+        if (buckets.length === 0 || ts >= (buckets[buckets.length - 1].start + waitMillis)) {
+          buckets.push({ start: ts, count: 1 });
+        } else {
+          buckets[buckets.length - 1].count++;
+        }
+      });
+      return buckets;
+    }
+
+    // --- HELPER FUNCTIONS ---
+    function getTodayStart() { const d = new Date(); d.setHours(0,0,0,0); return d.getTime(); }
+    
+    function getWeekStart(targetDay) {
+      const d = new Date();
+      d.setHours(0,0,0,0);
+      const day = d.getDay();
+      const diff = (day < targetDay) ? (7 - (targetDay - day)) : (day - targetDay);
+      d.setDate(d.getDate() - diff);
+      return d.getTime();
+    }
+
+    function fmtTime(ms) {
+      const s = Math.ceil(ms/1000); const h = Math.floor(s/3600);
+      const m = Math.floor((s%3600)/60);
+      if (h > 0) return `${h}h ${m}m`; return `${m}m`;
+    }
+    function showStatus(msg, type) {
+       const el = document.getElementById('status-msg');
+       el.innerText = msg;
+       el.classList.remove('hidden');
+       if (type === 'error') el.classList.add('bg-red-100', 'text-red-800');
+    }
+
+    // --- UNDO LOGIC ---
+    const modalEl = document.getElementById('confirm-modal');
+    const boxEl = document.getElementById('confirm-box');
+    const titleEl = document.getElementById('confirm-title');
+    const textEl = document.getElementById('confirm-text');
+    const yesBtn = document.getElementById('confirm-yes');
+    
+    function requestUndo(id) {
+      const med = DB.find(m => m.id === id);
+      const history = log[id] || [];
+      if (history.length === 0) return;
+
+      const lastDose = history[history.length - 1];
+      let lastTime = typeof lastDose === 'object' ? lastDose.ts : lastDose;
+      let timeStr = new Date(lastTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+      titleEl.innerText = `Undo ${med.name}?`;
+      textEl.innerText = `Undo dose taken at ${timeStr}?`;
+      yesBtn.onclick = () => confirmUndo(id);
+      
+      modalEl.classList.remove('hidden');
+      setTimeout(() => { modalEl.style.opacity = '1'; boxEl.style.transform = 'scale(1)'; }, 10);
+    }
+    
+    function confirmUndo(id) {
+      if (!log[id] || log[id].length === 0) return;
+      log[id].pop();
+      save();
+      render();
+      hideConfirm();
+    }
+    
+    function hideConfirm() {
+      modalEl.style.opacity = '0'; boxEl.style.transform = 'scale(0.95)';
+      setTimeout(() => { modalEl.classList.add('hidden'); }, 200);
+    }
+
+    // --- RENDER FUNCTIONS ---
+    function buildCard(content, buttons) {
+      return `<div class="bg-gray-800 p-4 rounded-xl shadow-sm border border-gray-700 flex flex-col gap-3">
+                ${content}
+                <div class="flex gap-2">${buttons}</div>
+              </div>`;
+    }
+    
+    function buildButton(text, onclick, color, disabled = false) {
+      const colors = { blue: 'bg-blue-600', green: 'bg-green-600', orange: 'bg-orange-500', gray: 'bg-gray-700', indigo: 'bg-indigo-600' };
+      const hover = { blue: 'hover:bg-blue-500', green: 'hover:bg-green-500', orange: 'hover:bg-orange-400', gray: 'hover:bg-gray-600', indigo: 'hover:bg-indigo-500' };
+      
+      return `<button onclick="${onclick}" ${disabled ? 'disabled' : ''} 
+                class="flex-grow py-3 rounded-lg font-bold text-white transition-all active:scale-95 ${colors[color]} ${!disabled ? hover[color] : ''} ${disabled ? 'opacity-50 cursor-not-allowed' : ''}">
+                ${text}
+              </button>`;
+    }
+
+    function buildUndoButton(id, history) {
+      if (!history || history.length === 0) return '';
+      return `<button onclick="requestUndo('${id}')" 
+                class="w-12 h-12 flex-shrink-0 flex items-center justify-center rounded-lg bg-gray-700 hover:bg-gray-600 active:scale-95">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-6 h-6 text-gray-300">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" />
+                </svg>
+              </button>`;
+    }
+    
+    function renderCardHeader(name, desc, statusText, statusColor = 'text-blue-500') {
+      return `<div class="flex justify-between items-start">
+                <div><h3 class="font-bold text-lg">${name}</h3><p class="text-xs text-gray-400">${desc}</p></div>
+                <span class="text-2xl font-bold ${statusColor}">${statusText}</span>
+              </div>`;
+    }
+    
+    function renderCardHeaderSimple(name, desc, statusText) {
+       return `<div class="flex justify-between items-start">
+                <div><h3 class="font-bold text-lg">${name}</h3><p class="text-xs text-gray-400">${desc}</p></div>
+                <span class="text-xs font-mono bg-gray-700 px-2 py-1 rounded">${statusText}</span>
+              </div>`;
+    }
+
+    // --- MAIN RENDER LOOP ---
+    function render() {
+      const now = Date.now(); const today = getTodayStart(); const dayAgo = now - (24*60*60*1000);
+      let htmlSched = '', htmlWeekly = '', htmlPrn = '', htmlTop = '';
+
+      DB.forEach(med => {
+        const history = log[med.id] || [];
+        const unit = med.unit || 'Dose';
+        
+        if (med.type === 'sched') {
+          const amtPerTap = med.amt || 1;
+          const tabletsToday = history.filter(h => h.ts >= today).reduce((sum, h) => sum + h.amt, 0);
+          const done = tabletsToday >= med.total;
+          const statusColor = done ? 'text-green-500' : 'text-blue-500';
+          const header = renderCardHeader(med.name, med.desc, `${tabletsToday}/${med.total}`, statusColor);
+          const btn = buildButton(done ? 'Done for Today' : `Take ${amtPerTap} ${unit}`, `logDose('${med.id}', ${amtPerTap})`, done ? 'green' : 'blue', done);
+          const undoBtn = buildUndoButton(med.id, history);
+          htmlSched += buildCard(header, `<div class="flex gap-2">${undoBtn}${btn}</div>`);
+
+        } else if (med.type === 'sched-window') {
+          const allBuckets = getDoseBuckets(history, med.wait);
+          const todayBuckets = allBuckets.filter(b => b.start >= today);
+          const dosesTakenToday = todayBuckets.length;
+          
+          let btnText = '', btnColor = '', disabled = false;
+          const lastBucket = allBuckets.length > 0 ? allBuckets[allBuckets.length - 1] : null;
+          const nextDoseTime = lastBucket ? lastBucket.start + (med.wait * 3600 * 1000) : 0;
+          
+          if (lastBucket && now < nextDoseTime) {
+            if (lastBucket.count < med.maxPool) {
+               const rem = med.maxPool - lastBucket.count;
+               const label = rem > 1 ? `1-${rem}` : '1';
+               btnText = `Take ${label} ${unit}${rem > 1 ? 's' : ''}`; btnColor = 'orange';
+            } else {
+               const timeRem = nextDoseTime - now;
+               btnText = `Next dose in ${fmtTime(timeRem)}`; btnColor = 'gray'; disabled = true;
+            }
+          } else {
+            if (dosesTakenToday >= med.total) {
+               btnText = 'Done for Today'; btnColor = 'gray'; disabled = true;
+            } else {
+               const range = med.maxPool > 1 ? `1-${med.maxPool}` : '1';
+               btnText = `Take ${range} ${unit}s`; btnColor = 'blue';
+            }
+          }
+          
+          const header = renderCardHeader(med.name, med.desc, `${dosesTakenToday}/${med.total} doses`, 'text-blue-500');
+          const btn = buildButton(btnText, `logDose('${med.id}', 1)`, btnColor, disabled);
+          const undoBtn = buildUndoButton(med.id, history);
+          htmlSched += buildCard(header, `<div class="flex gap-2">${undoBtn}${btn}</div>`);
+
+        } else if (med.type === 'weekly') {
+          const weekStart = getWeekStart(med.targetDay);
+          const dosesThisWeek = history.filter(h => h.ts >= weekStart).reduce((sum, h) => sum + h.amt, 0);
+          const done = dosesThisWeek >= med.total;
+          const statusColor = done ? 'text-green-500' : 'text-blue-500';
+          const header = renderCardHeader(med.name, med.desc, `${dosesThisWeek}/${med.total}`, statusColor);
+          const btn = buildButton(done ? 'Done for Week' : `Take ${med.amt} ${unit}`, `logDose('${med.id}', ${med.amt})`, done ? 'green' : 'blue', done);
+          const undoBtn = buildUndoButton(med.id, history);
+          htmlWeekly += buildCard(header, `<div class="flex gap-2">${undoBtn}${btn}</div>`);
+
+        } else if (med.type === 'prn-pool') {
+          const cooldownMillis = med.wait * 3600 * 1000;
+          const activeCooldowns = history.map(ts => ts + cooldownMillis).filter(endTs => endTs > now);
+          const availableFromPool = med.maxPool - activeCooldowns.length;
+          const tabletsIn24h = history.filter(ts => ts > dayAgo).length;
+          const availableForDay = med.max24h - tabletsIn24h;
+          const canTake = Math.max(0, Math.min(availableFromPool, availableForDay));
+          
+          let btnText = '', btnColor = '', disabled = false;
+
+          if (availableForDay <= 0) {
+            btnText = 'Max doses for 24h'; btnColor = 'gray'; disabled = true;
+          } else if (canTake === 0) {
+            const soonestEnd = Math.min(...activeCooldowns);
+            btnText = `Wait ${fmtTime(soonestEnd - now)}`; btnColor = 'orange'; disabled = true;
+          } else {
+            const range = canTake > 1 ? `1-${canTake}` : '1';
+            btnText = `Take ${range} ${unit}${canTake > 1 ? 's' : ''}`; btnColor = 'green';
+          }
+          
+          const header = renderCardHeaderSimple(med.name, med.desc, `${tabletsIn24h}/${med.max24h} ${unit}s`);
+          const btn = buildButton(btnText, `logDose('${med.id}', 1)`, btnColor, disabled);
+          const undoBtn = buildUndoButton(med.id, history);
+          htmlPrn += buildCard(header, `<div class="flex gap-2">${undoBtn}${btn}</div>`);
+          
+        } else if (med.type === 'prn') {
+          const amtPerTap = med.amt || 1;
+          const tabletsIn24h = history.filter(ts => ts > dayAgo).length * amtPerTap;
+          const lastEventTs = history.length ? history[history.length - 1] : 0;
+          
+          let onCooldown = false, timeRem = 0, btnText = `Take ${amtPerTap} ${unit}`, btnColor = 'green', disabled = false;
+          
+          if (lastEventTs > 0 && med.wait > 0) {
+            const nextAvailable = lastEventTs + (med.wait * 3600 * 1000);
+            if (now < nextAvailable) { onCooldown = true; timeRem = nextAvailable - now; }
+          }
+          if (tabletsIn24h >= med.max24h) {
+            btnText = 'Max doses for 24h'; btnColor = 'gray'; disabled = true;
+          } else if (onCooldown) {
+            btnText = `Wait ${fmtTime(timeRem)}`; btnColor = 'orange'; disabled = true;
+          }
+          const header = renderCardHeaderSimple(med.name, med.desc, `${tabletsIn24h}/${med.max24h} ${unit}s`);
+          const btn = buildButton(btnText, `logDose('${med.id}', ${amtPerTap})`, btnColor, disabled);
+          const undoBtn = buildUndoButton(med.id, history);
+          htmlPrn += buildCard(header, `<div class="flex gap-2">${undoBtn}${btn}</div>`);
+
+        } else if (med.type === 'topical') {
+          const last = history.length ? new Date(history[history.length - 1].ts).toLocaleString() : 'Never';
+          const header = renderCardHeaderSimple(med.name, med.desc, `Last: ${last}`);
+          const btn = buildButton('Log Application', `logDose('${med.id}', 1)`, 'indigo');
+          const undoBtn = buildUndoButton(med.id, history);
+          htmlTop += buildCard(header, `<div class="flex gap-2">${undoBtn}${btn}</div>`);
+        }
+      });
+
+      document.getElementById('scheduled-cards').innerHTML = htmlSched;
+      document.getElementById('weekly-cards').innerHTML = htmlWeekly;
+      document.getElementById('prn-cards').innerHTML = htmlPrn;
+      document.getElementById('topical-cards').innerHTML = htmlTop;
+    }
+    
+    setTimeout(load, 0);
+    setInterval(render, 1000);
+  </script>
+</body>
+</html>
