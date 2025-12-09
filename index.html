@@ -8,6 +8,8 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
+    /* Prevent double-tap zoom on buttons */
+    button { touch-action: manipulation; }
     #confirm-modal { transition: opacity 0.2s ease-in-out; }
     #confirm-box { transition: transform 0.2s ease-in-out; transform: scale(0.95); }
   </style>
@@ -17,7 +19,7 @@
   <header class="bg-blue-600 text-white p-4 shadow-md sticky top-0 z-50">
     <div class="max-w-md mx-auto flex justify-between items-center pt-[env(safe-area-inset-top)]">
       <h1 class="text-xl font-bold">My Tracker</h1>
-      <button onclick="window.location.reload()" class="text-sm bg-blue-700 px-3 py-1 rounded">Refresh</button>
+      <button onclick="window.location.reload()" class="text-sm bg-blue-700 px-3 py-1 rounded shadow-sm active:bg-blue-800">Refresh</button>
     </div>
   </header>
 
@@ -60,9 +62,9 @@
     // --- MEDICATION DATABASE ---
     const DB = [
       // --- 3x DAILY ---
-      // Gabapentin uses Window Logic (sched-window)
-      { id: 'gabapentin100', name: 'Gabapentin 100mg', type: 'sched-window', total: 3, maxPool: 2, wait: 5, desc: '1-2 caps, 3x daily', unit: 'Cap' },
-      { id: 'gabapentin300', name: 'Gabapentin 300mg', type: 'sched-window', total: 3, maxPool: 2, wait: 6, desc: '1-2 caps, 3x daily', unit: 'Cap' },
+      // UPDATED: maxPool increased to 3
+      { id: 'gabapentin100', name: 'Gabapentin 100mg', type: 'sched-window', total: 3, maxPool: 3, wait: 5, desc: '1-3 caps, 3x daily', unit: 'Cap' },
+      { id: 'gabapentin300', name: 'Gabapentin 300mg', type: 'sched-window', total: 3, maxPool: 3, wait: 6, desc: '1-3 caps, 3x daily', unit: 'Cap' },
       { id: 'peppermint', name: 'Peppermint Oil', type: 'sched', total: 3, desc: '1 three times daily (before food)', amt: 1, unit: 'Cap' },
 
       // --- 2x DAILY ---
@@ -81,8 +83,8 @@
       { id: 'semaglutide', name: 'Semaglutide', type: 'weekly', total: 1, desc: '1 injection weekly (Tuesday)', amt: 1, unit: 'Inj', targetDay: 2 },
 
       // --- PRN (POOL LOGIC) ---
-      // Codeine reverted to Pool Logic (prn-pool)
-      { id: 'codeine', name: 'Codeine 15mg', type: 'prn-pool', wait: 4, maxPool: 2, max24h: 8, desc: '1-2 tablets per dose', unit: 'Tab' },
+      // UPDATED: maxPool to 3, max24h to 12
+      { id: 'codeine', name: 'Codeine 15mg', type: 'prn-pool', wait: 4, maxPool: 3, max24h: 12, desc: '1-3 tablets per dose', unit: 'Tab' },
       { id: 'paracetamol', name: 'Paracetamol 500mg', type: 'prn-pool', wait: 4, maxPool: 2, max24h: 8, desc: '1-2 tablets per dose', unit: 'Tab' },
       { id: 'hyoscine', name: 'Hyoscine 10mg', type: 'prn-pool', wait: 4, maxPool: 2, max24h: 8, desc: '1-2 for stomach pain', unit: 'Tab' },
 
@@ -138,10 +140,25 @@
     }
 
     // --- HELPER FUNCTIONS ---
-    function getTodayStart() { const d = new Date(); d.setHours(0,0,0,0); return d.getTime(); }
+    
+    // UPDATED: Start of day is now 05:00 AM
+    function getTodayStart() {
+      const now = new Date();
+      // If current hour is before 5 AM, we consider it part of the previous day
+      if (now.getHours() < 5) {
+        now.setDate(now.getDate() - 1);
+      }
+      now.setHours(5, 0, 0, 0); // Set reset time to 05:00:00
+      return now.getTime();
+    }
     
     function getWeekStart(targetDay) {
       const d = new Date();
+      // Use standard midnight logic for weekly or align with daily? 
+      // Safest to align with daily logic roughly, but Date manipulation needs care.
+      // We will just use the same "Shift back if before 5am" logic
+      if (d.getHours() < 5) d.setDate(d.getDate() - 1);
+      
       d.setHours(0,0,0,0);
       const day = d.getDay();
       const diff = (day < targetDay) ? (7 - (targetDay - day)) : (day - targetDay);
@@ -154,6 +171,28 @@
       const m = Math.floor((s%3600)/60);
       if (h > 0) return `${h}h ${m}m`; return `${m}m`;
     }
+
+    function formatLastTime(history) {
+      if (!history || history.length === 0) return 'Never';
+      const lastEntry = history[history.length - 1];
+      const ts = typeof lastEntry === 'object' ? lastEntry.ts : lastEntry;
+      
+      const date = new Date(ts);
+      const now = new Date();
+      const isToday = date.toDateString() === now.toDateString();
+      
+      // Simple 12h time format
+      const timeStr = date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      
+      if (isToday) return timeStr;
+      
+      // If yesterday (rough check)
+      const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1);
+      if (date.toDateString() === yesterday.toDateString()) return `Yest ${timeStr}`;
+      
+      return `${date.getDate()}/${date.getMonth()+1} ${timeStr}`;
+    }
+
     function showStatus(msg, type) {
        const el = document.getElementById('status-msg');
        el.innerText = msg;
@@ -202,7 +241,7 @@
     function buildCard(content, buttons) {
       return `<div class="bg-gray-800 p-4 rounded-xl shadow-sm border border-gray-700 flex flex-col gap-3">
                 ${content}
-                <div class="flex gap-2">${buttons}</div>
+                <div class="flex gap-2 w-full">${buttons}</div>
               </div>`;
     }
     
@@ -210,8 +249,9 @@
       const colors = { blue: 'bg-blue-600', green: 'bg-green-600', orange: 'bg-orange-500', gray: 'bg-gray-700', indigo: 'bg-indigo-600' };
       const hover = { blue: 'hover:bg-blue-500', green: 'hover:bg-green-500', orange: 'hover:bg-orange-400', gray: 'hover:bg-gray-600', indigo: 'hover:bg-indigo-500' };
       
+      // Added flex-1 to ensure it fills space, min-w-0 prevents overflow
       return `<button onclick="${onclick}" ${disabled ? 'disabled' : ''} 
-                class="flex-grow py-3 rounded-lg font-bold text-white transition-all active:scale-95 ${colors[color]} ${!disabled ? hover[color] : ''} ${disabled ? 'opacity-50 cursor-not-allowed' : ''}">
+                class="flex-1 min-w-0 py-3 px-2 rounded-lg font-bold text-white transition-all active:scale-95 whitespace-nowrap overflow-hidden text-ellipsis ${colors[color]} ${!disabled ? hover[color] : ''} ${disabled ? 'opacity-50 cursor-not-allowed' : ''}">
                 ${text}
               </button>`;
     }
@@ -219,45 +259,61 @@
     function buildUndoButton(id, history) {
       if (!history || history.length === 0) return '';
       return `<button onclick="requestUndo('${id}')" 
-                class="w-12 h-12 flex-shrink-0 flex items-center justify-center rounded-lg bg-gray-700 hover:bg-gray-600 active:scale-95">
+                class="flex-none w-12 h-12 flex items-center justify-center rounded-lg bg-gray-700 hover:bg-gray-600 active:scale-95">
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-6 h-6 text-gray-300">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" />
                 </svg>
               </button>`;
     }
     
-    function renderCardHeader(name, desc, statusText, statusColor = 'text-blue-500') {
+    // UPDATED: Now includes lastTime string
+    function renderCardHeader(name, desc, statusText, lastTime, statusColor = 'text-blue-500') {
       return `<div class="flex justify-between items-start">
-                <div><h3 class="font-bold text-lg">${name}</h3><p class="text-xs text-gray-400">${desc}</p></div>
-                <span class="text-2xl font-bold ${statusColor}">${statusText}</span>
+                <div class="flex-1 mr-2">
+                  <h3 class="font-bold text-lg leading-tight">${name}</h3>
+                  <p class="text-xs text-gray-400 mt-1">${desc}</p>
+                  <p class="text-xs text-indigo-300 mt-0.5 font-medium">Last: ${lastTime}</p>
+                </div>
+                <span class="text-2xl font-bold ${statusColor} whitespace-nowrap">${statusText}</span>
               </div>`;
     }
     
-    function renderCardHeaderSimple(name, desc, statusText) {
+    // UPDATED: Now includes lastTime string
+    function renderCardHeaderSimple(name, desc, statusText, lastTime) {
        return `<div class="flex justify-between items-start">
-                <div><h3 class="font-bold text-lg">${name}</h3><p class="text-xs text-gray-400">${desc}</p></div>
-                <span class="text-xs font-mono bg-gray-700 px-2 py-1 rounded">${statusText}</span>
+                <div class="flex-1 mr-2">
+                  <h3 class="font-bold text-lg leading-tight">${name}</h3>
+                  <p class="text-xs text-gray-400 mt-1">${desc}</p>
+                  <p class="text-xs text-indigo-300 mt-0.5 font-medium">Last: ${lastTime}</p>
+                </div>
+                <span class="text-xs font-mono bg-gray-700 px-2 py-1 rounded whitespace-nowrap">${statusText}</span>
               </div>`;
     }
 
     // --- MAIN RENDER LOOP ---
     function render() {
-      const now = Date.now(); const today = getTodayStart(); const dayAgo = now - (24*60*60*1000);
+      const now = Date.now(); 
+      const today = getTodayStart(); 
+      // For PRN "in last 24h" check, we still look back exactly 24h from now, independent of reset time
+      const dayAgo = now - (24*60*60*1000); 
+
       let htmlSched = '', htmlWeekly = '', htmlPrn = '', htmlTop = '';
 
       DB.forEach(med => {
         const history = log[med.id] || [];
         const unit = med.unit || 'Dose';
+        const lastTimeStr = formatLastTime(history);
         
         if (med.type === 'sched') {
           const amtPerTap = med.amt || 1;
           const tabletsToday = history.filter(h => h.ts >= today).reduce((sum, h) => sum + h.amt, 0);
           const done = tabletsToday >= med.total;
           const statusColor = done ? 'text-green-500' : 'text-blue-500';
-          const header = renderCardHeader(med.name, med.desc, `${tabletsToday}/${med.total}`, statusColor);
-          const btn = buildButton(done ? 'Done for Today' : `Take ${amtPerTap} ${unit}`, `logDose('${med.id}', ${amtPerTap})`, done ? 'green' : 'blue', done);
+          
+          const header = renderCardHeader(med.name, med.desc, `${tabletsToday}/${med.total}`, lastTimeStr, statusColor);
+          const btn = buildButton(done ? 'Done' : `Take ${amtPerTap} ${unit}`, `logDose('${med.id}', ${amtPerTap})`, done ? 'green' : 'blue', done);
           const undoBtn = buildUndoButton(med.id, history);
-          htmlSched += buildCard(header, `<div class="flex gap-2">${undoBtn}${btn}</div>`);
+          htmlSched += buildCard(header, `${undoBtn}${btn}`); // Removed extra div wrapper for better flex control
 
         } else if (med.type === 'sched-window') {
           const allBuckets = getDoseBuckets(history, med.wait);
@@ -275,31 +331,31 @@
                btnText = `Take ${label} ${unit}${rem > 1 ? 's' : ''}`; btnColor = 'orange';
             } else {
                const timeRem = nextDoseTime - now;
-               btnText = `Next dose in ${fmtTime(timeRem)}`; btnColor = 'gray'; disabled = true;
+               btnText = `Next: ${fmtTime(timeRem)}`; btnColor = 'gray'; disabled = true;
             }
           } else {
             if (dosesTakenToday >= med.total) {
-               btnText = 'Done for Today'; btnColor = 'gray'; disabled = true;
+               btnText = 'Done for Day'; btnColor = 'gray'; disabled = true;
             } else {
                const range = med.maxPool > 1 ? `1-${med.maxPool}` : '1';
                btnText = `Take ${range} ${unit}s`; btnColor = 'blue';
             }
           }
           
-          const header = renderCardHeader(med.name, med.desc, `${dosesTakenToday}/${med.total} doses`, 'text-blue-500');
+          const header = renderCardHeader(med.name, med.desc, `${dosesTakenToday}/${med.total}`, lastTimeStr, 'text-blue-500');
           const btn = buildButton(btnText, `logDose('${med.id}', 1)`, btnColor, disabled);
           const undoBtn = buildUndoButton(med.id, history);
-          htmlSched += buildCard(header, `<div class="flex gap-2">${undoBtn}${btn}</div>`);
+          htmlSched += buildCard(header, `${undoBtn}${btn}`);
 
         } else if (med.type === 'weekly') {
           const weekStart = getWeekStart(med.targetDay);
           const dosesThisWeek = history.filter(h => h.ts >= weekStart).reduce((sum, h) => sum + h.amt, 0);
           const done = dosesThisWeek >= med.total;
           const statusColor = done ? 'text-green-500' : 'text-blue-500';
-          const header = renderCardHeader(med.name, med.desc, `${dosesThisWeek}/${med.total}`, statusColor);
-          const btn = buildButton(done ? 'Done for Week' : `Take ${med.amt} ${unit}`, `logDose('${med.id}', ${med.amt})`, done ? 'green' : 'blue', done);
+          const header = renderCardHeader(med.name, med.desc, `${dosesThisWeek}/${med.total}`, lastTimeStr, statusColor);
+          const btn = buildButton(done ? 'Done Wk' : `Take ${med.amt} ${unit}`, `logDose('${med.id}', ${med.amt})`, done ? 'green' : 'blue', done);
           const undoBtn = buildUndoButton(med.id, history);
-          htmlWeekly += buildCard(header, `<div class="flex gap-2">${undoBtn}${btn}</div>`);
+          htmlWeekly += buildCard(header, `${undoBtn}${btn}`);
 
         } else if (med.type === 'prn-pool') {
           const cooldownMillis = med.wait * 3600 * 1000;
@@ -312,7 +368,7 @@
           let btnText = '', btnColor = '', disabled = false;
 
           if (availableForDay <= 0) {
-            btnText = 'Max doses for 24h'; btnColor = 'gray'; disabled = true;
+            btnText = 'Max 24h'; btnColor = 'gray'; disabled = true;
           } else if (canTake === 0) {
             const soonestEnd = Math.min(...activeCooldowns);
             btnText = `Wait ${fmtTime(soonestEnd - now)}`; btnColor = 'orange'; disabled = true;
@@ -321,10 +377,10 @@
             btnText = `Take ${range} ${unit}${canTake > 1 ? 's' : ''}`; btnColor = 'green';
           }
           
-          const header = renderCardHeaderSimple(med.name, med.desc, `${tabletsIn24h}/${med.max24h} ${unit}s`);
+          const header = renderCardHeaderSimple(med.name, med.desc, `${tabletsIn24h}/${med.max24h} ${unit}s`, lastTimeStr);
           const btn = buildButton(btnText, `logDose('${med.id}', 1)`, btnColor, disabled);
           const undoBtn = buildUndoButton(med.id, history);
-          htmlPrn += buildCard(header, `<div class="flex gap-2">${undoBtn}${btn}</div>`);
+          htmlPrn += buildCard(header, `${undoBtn}${btn}`);
           
         } else if (med.type === 'prn') {
           const amtPerTap = med.amt || 1;
@@ -338,21 +394,21 @@
             if (now < nextAvailable) { onCooldown = true; timeRem = nextAvailable - now; }
           }
           if (tabletsIn24h >= med.max24h) {
-            btnText = 'Max doses for 24h'; btnColor = 'gray'; disabled = true;
+            btnText = 'Max 24h'; btnColor = 'gray'; disabled = true;
           } else if (onCooldown) {
             btnText = `Wait ${fmtTime(timeRem)}`; btnColor = 'orange'; disabled = true;
           }
-          const header = renderCardHeaderSimple(med.name, med.desc, `${tabletsIn24h}/${med.max24h} ${unit}s`);
+          const header = renderCardHeaderSimple(med.name, med.desc, `${tabletsIn24h}/${med.max24h} ${unit}s`, lastTimeStr);
           const btn = buildButton(btnText, `logDose('${med.id}', ${amtPerTap})`, btnColor, disabled);
           const undoBtn = buildUndoButton(med.id, history);
-          htmlPrn += buildCard(header, `<div class="flex gap-2">${undoBtn}${btn}</div>`);
+          htmlPrn += buildCard(header, `${undoBtn}${btn}`);
 
         } else if (med.type === 'topical') {
-          const last = history.length ? new Date(history[history.length - 1].ts).toLocaleString() : 'Never';
-          const header = renderCardHeaderSimple(med.name, med.desc, `Last: ${last}`);
-          const btn = buildButton('Log Application', `logDose('${med.id}', 1)`, 'indigo');
+          // For topicals, we use the same generic header logic now
+          const header = renderCardHeaderSimple(med.name, med.desc, '', lastTimeStr);
+          const btn = buildButton('Log Use', `logDose('${med.id}', 1)`, 'indigo');
           const undoBtn = buildUndoButton(med.id, history);
-          htmlTop += buildCard(header, `<div class="flex gap-2">${undoBtn}${btn}</div>`);
+          htmlTop += buildCard(header, `${undoBtn}${btn}`);
         }
       });
 
