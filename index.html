@@ -32,4 +32,221 @@
     </section>
     
     <section id="weekly-section">
-      <h2 class="text-lg font-semibold text-gray-400 mb-2 uppercase tracking-
+      <h2 class="text-lg font-semibold text-gray-400 mb-2 uppercase tracking-wide text-xs">Weekly Scheduled</h2>
+      <div id="weekly-cards" class="space-y-3"></div>
+    </section>
+
+    <section id="prn-section">
+      <h2 class="text-lg font-semibold text-gray-400 mb-2 uppercase tracking-wide text-xs">As Needed (Pain & Anxiety)</h2>
+      <div id="prn-cards" class="space-y-3"></div>
+    </section>
+
+    <section id="topical-section">
+      <h2 class="text-lg font-semibold text-gray-400 mb-2 uppercase tracking-wide text-xs">Creams & Shampoo</h2>
+      <div id="topical-cards" class="space-y-3"></div>
+    </section>
+  </main>
+
+  <div id="confirm-modal" class="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black bg-opacity-70 hidden opacity-0" onclick="hideConfirm()">
+    <div id="confirm-box" class="bg-gray-800 p-6 rounded-xl shadow-2xl w-full max-w-sm" onclick="event.stopPropagation()">
+      <h3 id="confirm-title" class="text-lg font-bold text-white mb-2">Confirm Undo</h3>
+      <p id="confirm-text" class="text-gray-300 mb-6">Are you sure?</p>
+      <div class="flex gap-3">
+        <button id="confirm-cancel" class="w-full py-3 rounded-lg font-bold bg-gray-600 hover:bg-gray-500 text-white" onclick="hideConfirm()">Cancel</button>
+        <button id="confirm-yes" class="w-full py-3 rounded-lg font-bold bg-red-600 hover:bg-red-500 text-white">Yes, Undo</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // --- MEDICATION DATABASE ---
+    const DB = [
+      // --- 3x DAILY ---
+      // (100mg Gabapentin has been removed)
+      { id: 'gabapentin300', name: 'Gabapentin 300mg', type: 'sched-window', total: 3, maxPool: 3, wait: 6, desc: '1-3 caps, 3x daily', unit: 'Cap' },
+      { id: 'peppermint', name: 'Peppermint Oil', type: 'sched', total: 3, desc: '1 three times daily (before food)', amt: 1, unit: 'Cap' },
+
+      // --- 2x DAILY ---
+      { id: 'sertraline', name: 'Sertraline 100mg', type: 'sched', total: 2, desc: '2 daily (for anxiety)', amt: 1, unit: 'Tab' },
+      { id: 'naproxen', name: 'Naproxen 500mg', type: 'sched', total: 2, desc: '1 twice daily', amt: 1, unit: 'Tab' },
+
+      // --- 1x DAILY ---
+      { id: 'omeprazole', name: 'Omeprazole 20mg', type: 'sched', total: 1, desc: '1 daily (with Naproxen)', amt: 1, unit: 'Cap' },
+      { id: 'tamsulosin', name: 'Tamsulosin 400mcg', type: 'sched', total: 1, desc: '1 daily', amt: 1, unit: 'Cap' },
+      { id: 'prep', name: 'Prep', type: 'sched', total: 1, desc: '1 daily', amt: 1, unit: 'Tab' },
+      { id: 'turmeric', name: 'Turmeric & Pepper', type: 'sched', total: 1, desc: '1 daily', amt: 1, unit: 'Cap' },
+      { id: 'multivit', name: 'Multi-Vitamins', type: 'sched', total: 1, desc: '1 daily', amt: 1, unit: 'Tab' },
+      { id: 'vitamind', name: 'Vitamin D', type: 'sched', total: 1, desc: '1 daily', amt: 1, unit: 'Tab' },
+
+      // --- WEEKLY ---
+      { id: 'semaglutide', name: 'Semaglutide', type: 'weekly', total: 1, desc: '1 injection weekly (Tuesday)', amt: 1, unit: 'Inj', targetDay: 2 },
+
+      // --- PRN (POOL LOGIC) ---
+      { id: 'codeine', name: 'Codeine 15mg', type: 'prn-pool', wait: 4, maxPool: 3, max24h: 12, desc: '1-3 tablets per dose', unit: 'Tab' },
+      { id: 'paracetamol', name: 'Paracetamol 500mg', type: 'prn-pool', wait: 4, maxPool: 2, max24h: 8, desc: '1-2 tablets per dose', unit: 'Tab' },
+      { id: 'hyoscine', name: 'Hyoscine 10mg', type: 'prn-pool', wait: 4, maxPool: 2, max24h: 8, desc: '1-2 for stomach pain', unit: 'Tab' },
+
+      // --- PRN (SIMPLE) ---
+      { id: 'propranolol', name: 'Propranolol 40mg', type: 'prn', wait: 4, max24h: 4, desc: '1 for anxiety (up to 4x)', amt: 1, unit: 'Tab' },
+      { id: 'loperamide', name: 'Loperamide 2mg', type: 'prn', wait: 0, max24h: 8, desc: '1 for diarrhoea if required', amt: 1, unit: 'Cap' },
+
+      // --- TOPICAL ---
+      { id: 'cream', name: 'Hydrocortisone Cream', type: 'topical', desc: 'Apply thinly 1x daily' },
+      { id: 'shampoo', name: 'Ketoconazole Shampoo', type: 'topical', desc: 'Apply 2x weekly' },
+    ];
+
+    const KEY = 'meds_v15_final_layout';
+    let log = {}; 
+
+    function load() {
+      try {
+        const data = localStorage.getItem(KEY);
+        if (data) log = JSON.parse(data);
+      } catch(e) { showStatus("⚠️ Saving Disabled", 'error'); }
+      render();
+    }
+
+    function save() { try { localStorage.setItem(KEY, JSON.stringify(log)); } catch(e) {} }
+
+    function logDose(id, amount = 1) {
+      if (!log[id]) log[id] = [];
+      const now = Date.now();
+      const med = DB.find(m => m.id === id);
+      
+      if (med.type === 'sched' || med.type === 'topical' || med.type === 'weekly') {
+        log[id].push({ts: now, amt: amount});
+      } else {
+        for (let i = 0; i < amount; i++) log[id].push(now);
+      }
+      save();
+      render();
+    }
+    
+    // --- BUCKET LOGIC ---
+    function getDoseBuckets(history, waitHours) {
+      const sorted = [...history].sort((a, b) => a - b);
+      const buckets = [];
+      const waitMillis = waitHours * 3600 * 1000;
+      sorted.forEach(ts => {
+        if (buckets.length === 0 || ts >= (buckets[buckets.length - 1].start + waitMillis)) {
+          buckets.push({ start: ts, count: 1 });
+        } else {
+          buckets[buckets.length - 1].count++;
+        }
+      });
+      return buckets;
+    }
+
+    // --- HELPER FUNCTIONS ---
+    
+    // Day starts at 05:00 AM
+    function getTodayStart() {
+      const now = new Date();
+      if (now.getHours() < 5) {
+        now.setDate(now.getDate() - 1);
+      }
+      now.setHours(5, 0, 0, 0); 
+      return now.getTime();
+    }
+    
+    function getWeekStart(targetDay) {
+      const d = new Date();
+      if (d.getHours() < 5) d.setDate(d.getDate() - 1);
+      d.setHours(0,0,0,0);
+      const day = d.getDay();
+      const diff = (day < targetDay) ? (7 - (targetDay - day)) : (day - targetDay);
+      d.setDate(d.getDate() - diff);
+      return d.getTime();
+    }
+
+    function fmtTime(ms) {
+      const s = Math.ceil(ms/1000); const h = Math.floor(s/3600);
+      const m = Math.floor((s%3600)/60);
+      if (h > 0) return `${h}h ${m}m`; return `${m}m`;
+    }
+
+    function formatLastTime(history) {
+      if (!history || history.length === 0) return 'Never';
+      const lastEntry = history[history.length - 1];
+      const ts = typeof lastEntry === 'object' ? lastEntry.ts : lastEntry;
+      
+      const date = new Date(ts);
+      const now = new Date();
+      const isToday = date.toDateString() === now.toDateString();
+      
+      const timeStr = date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      
+      if (isToday) return timeStr;
+      
+      const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1);
+      if (date.toDateString() === yesterday.toDateString()) return `Yest ${timeStr}`;
+      
+      return `${date.getDate()}/${date.getMonth()+1} ${timeStr}`;
+    }
+
+    function showStatus(msg, type) {
+       const el = document.getElementById('status-msg');
+       el.innerText = msg;
+       el.classList.remove('hidden');
+       if (type === 'error') el.classList.add('bg-red-100', 'text-red-800');
+    }
+
+    // --- UNDO LOGIC ---
+    const modalEl = document.getElementById('confirm-modal');
+    const boxEl = document.getElementById('confirm-box');
+    const titleEl = document.getElementById('confirm-title');
+    const textEl = document.getElementById('confirm-text');
+    const yesBtn = document.getElementById('confirm-yes');
+    
+    function requestUndo(id) {
+      const med = DB.find(m => m.id === id);
+      const history = log[id] || [];
+      if (history.length === 0) return;
+
+      const lastDose = history[history.length - 1];
+      let lastTime = typeof lastDose === 'object' ? lastDose.ts : lastDose;
+      let timeStr = new Date(lastTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+      titleEl.innerText = `Undo ${med.name}?`;
+      textEl.innerText = `Undo dose taken at ${timeStr}?`;
+      yesBtn.onclick = () => confirmUndo(id);
+      
+      modalEl.classList.remove('hidden');
+      setTimeout(() => { modalEl.style.opacity = '1'; boxEl.style.transform = 'scale(1)'; }, 10);
+    }
+    
+    function confirmUndo(id) {
+      if (!log[id] || log[id].length === 0) return;
+      log[id].pop();
+      save();
+      render();
+      hideConfirm();
+    }
+    
+    function hideConfirm() {
+      modalEl.style.opacity = '0'; boxEl.style.transform = 'scale(0.95)';
+      setTimeout(() => { modalEl.classList.add('hidden'); }, 200);
+    }
+
+    // --- RENDER FUNCTIONS ---
+    function buildCard(content, buttons) {
+      return `<div class="bg-gray-800 p-4 rounded-xl shadow-sm border border-gray-700 flex flex-col gap-3">
+                ${content}
+                <div class="flex gap-2 w-full">${buttons}</div>
+              </div>`;
+    }
+    
+    function buildButton(text, onclick, color, disabled = false) {
+      const colors = { blue: 'bg-blue-600', green: 'bg-green-600', orange: 'bg-orange-500', gray: 'bg-gray-700', indigo: 'bg-indigo-600' };
+      const hover = { blue: 'hover:bg-blue-500', green: 'hover:bg-green-500', orange: 'hover:bg-orange-400', gray: 'hover:bg-gray-600', indigo: 'hover:bg-indigo-500' };
+      
+      return `<button onclick="${onclick}" ${disabled ? 'disabled' : ''} 
+                class="flex-1 min-w-0 py-3 px-2 rounded-lg font-bold text-white transition-all active:scale-95 whitespace-nowrap overflow-hidden text-ellipsis ${colors[color]} ${!disabled ? hover[color] : ''} ${disabled ? 'opacity-50 cursor-not-allowed' : ''}">
+                ${text}
+              </button>`;
+    }
+
+    function buildUndoButton(id, history) {
+      if (!history || history.length === 0) return '';
+      return `<button onclick="requestUndo('${id}')" 
+                class="flex-none w-12 h-12 flex items-center justify-center rounded-lg bg-gray-700 hover:bg-gray-600 active:scale-95">
