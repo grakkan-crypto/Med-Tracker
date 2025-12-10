@@ -58,7 +58,6 @@
   </div>
 
   <script>
-    // Error catcher
     window.onerror = function(msg, url, line) {
       const el = document.getElementById('status-msg');
       el.innerText = "Error: " + msg;
@@ -66,7 +65,8 @@
     };
 
     const DB = [
-      { id: 'gabapentin300', name: 'Gabapentin 300mg', type: 'sched-window', total: 3, maxPool: 3, wait: 6, desc: '1-3 caps, 3x daily', unit: 'Cap' },
+      // Gabapentin: Total 4 windows, max 3 at a time, max 9 per day.
+      { id: 'gabapentin300', name: 'Gabapentin 300mg', type: 'sched-window', total: 4, maxPool: 3, dailyMaxPills: 9, wait: 6, desc: '1-3 caps, 3x daily (+rollover)', unit: 'Cap' },
       { id: 'peppermint', name: 'Peppermint Oil', type: 'sched', total: 3, desc: '1 three times daily', amt: 1, unit: 'Cap' },
       { id: 'sertraline', name: 'Sertraline 100mg', type: 'sched', total: 2, desc: '2 daily (anxiety)', amt: 1, unit: 'Tab' },
       { id: 'naproxen', name: 'Naproxen 500mg', type: 'sched', total: 2, desc: '1 twice daily', amt: 1, unit: 'Tab' },
@@ -86,7 +86,7 @@
       { id: 'shampoo', name: 'Ketoconazole Shampoo', type: 'topical', desc: 'Apply 2x weekly' },
     ];
 
-    const KEY = 'meds_v15_final_layout';
+    const KEY = 'meds_v17_final_rollover_safe';
     let log = {}; 
 
     function load() {
@@ -246,28 +246,42 @@
         } else if (med.type === 'sched-window') {
           const allBuckets = getDoseBuckets(history, med.wait);
           const todayBuckets = allBuckets.filter(b => b.start >= today);
-          const count = todayBuckets.length;
+          
+          // --- ROLLOVER LOGIC ---
+          const pillsToday = history.filter(ts => ts >= today).length;
+          const dailyLimit = med.dailyMaxPills || 999;
+          const remainingDaily = dailyLimit - pillsToday;
+
           let btnText = '', btnColor = '', disabled = false;
           const lastBucket = allBuckets.length > 0 ? allBuckets[allBuckets.length - 1] : null;
           const nextTime = lastBucket ? lastBucket.start + (med.wait * 3600 * 1000) : 0;
           
-          if (lastBucket && now < nextTime) {
+          if (remainingDaily <= 0) {
+             btnText = 'Max Daily Dose'; btnColor = 'gray'; disabled = true;
+          } else if (lastBucket && now < nextTime) {
+            // Window currently open
             if (lastBucket.count < med.maxPool) {
-               const rem = med.maxPool - lastBucket.count;
-               const label = rem > 1 ? `1-${rem}` : '1';
-               btnText = `Take ${label} ${unit}${rem > 1 ? 's' : ''}`; btnColor = 'orange';
+               const allowInSlot = med.maxPool - lastBucket.count;
+               const finalAllow = Math.min(allowInSlot, remainingDaily);
+               if (finalAllow > 0) {
+                 const label = finalAllow > 1 ? `1-${finalAllow}` : '1';
+                 btnText = `Take ${label} ${unit}${finalAllow > 1 ? 's' : ''}`; btnColor = 'orange';
+               } else {
+                 btnText = `Next: ${fmtTime(nextTime - now)}`; btnColor = 'gray'; disabled = true;
+               }
             } else {
                btnText = `Next: ${fmtTime(nextTime - now)}`; btnColor = 'gray'; disabled = true;
             }
           } else {
-            if (count >= med.total) {
+            // New window needed
+            if (todayBuckets.length >= med.total) {
                btnText = 'Done for Day'; btnColor = 'gray'; disabled = true;
             } else {
-               const range = med.maxPool > 1 ? `1-${med.maxPool}` : '1';
-               btnText = `Take ${range} ${unit}s`; btnColor = 'blue';
+               const range = Math.min(med.maxPool, remainingDaily);
+               btnText = `Take 1-${range} ${unit}s`; btnColor = 'blue';
             }
           }
-          const hdr = renderCardHeader(med.name, med.desc, `${count}/${med.total}`, lastTimeStr, 'text-blue-500');
+          const hdr = renderCardHeader(med.name, med.desc, `${pillsToday}/${dailyLimit}`, lastTimeStr, 'text-blue-500');
           htmlSched += buildCard(hdr, `${buildUndoButton(med.id, history)}${buildButton(btnText, `logDose('${med.id}', 1)`, btnColor, disabled)}`);
 
         } else if (med.type === 'weekly') {
